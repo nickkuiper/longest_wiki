@@ -1,13 +1,24 @@
+#Start logging the last edit of a page as well
+#Start from one page till third connections
+
+#I can also explore connections based on page categories -> American Architects for example
+
+#Show the biggest differences refered to, refered from
+
+#collect the birth and death dates
+
 #import packages
 import wikipedia
 from bs4 import BeautifulSoup as bs
 import requests
 import re
 import pandas as pd
+import mwparserfromhell
 import numpy as np
 import networkx as nx
 import matplotlib.pyplot as plt
 from pyvis.network import Network
+from dateutil.parser import parse
 
 res = requests.get("https://en.wikipedia.org/wiki/List_of_architects")
 soup = bs(res.text, "html.parser")
@@ -17,7 +28,7 @@ for link in soup.find_all("li"):
     try:
         url = link.a.get("href", "")
         if "/wiki/" in url:
-            print(url)
+            #print(url)
             title = link.a.get('title')
             url = url.lower()
             dft = pd.DataFrame({'url':url, 'title':title}, index = [0])
@@ -31,27 +42,80 @@ url_list = url_list[~url_list['url'].str.contains('http')]
 url_list = url_list[~url_list['url'].str.contains('list_of_')]
 url_list = url_list[~url_list['url'].str.contains('portal|category|file|foundation|booksource|special|main_page|film|help')]
 
-
+#url_list = url_list[200:221]
 #extract the name
+
 full_list = []
 full_links = []
 for i in url_list['title'].unique():
     print(i)
+    #i = 'Thomas Cubitt'
     try:
         p = wikipedia.page(i)
-        dft = pd.DataFrame({'Title':p.title, 'Url':p.url,'Page Length':len(p.content), 'Query': i, 'pageid': p.pageid}, index = [0])
-        full_list.append(dft)
+        p.categories
+
         try:
             #get the links
             links_df = pd.DataFrame(p.links)
             links_df['Page'] = p.title
             full_links.append(links_df)
+            try:
+                #get the url link
+                url_link = p.url.split('/')[-1]
+                url = 'https://en.wikipedia.org/w/api.php?action=query&prop=revisions&rvprop=content&rvsection=0&titles=' + url_link + '&format=json'
+                print(url)
+                res = requests.get(url)
+                text = list(res.json()["query"]["pages"].values())[0]["revisions"][0]["*"]
+                wiki = mwparserfromhell.parse(text)
+                try:
+                    birth_date = wiki.split('birth_date')[1].lower()
+                    birth_date = birth_date.replace('df=', '')
+                    birth_date = birth_date.replace('mf=', '')
+                    birth_date = birth_date.split('=')[1]
+                    birth_date = birth_date.split('\n')[0].strip()
+                    birth_date = birth_date.replace('{{','')
+                    birth_date = birth_date.replace('}}','')
+                    birth_date = birth_date.replace('|', '-')
+                    birth_date = birth_date.strip('y')
+                    birth_date = birth_date.strip('-')
+                    birth_date = parse(birth_date, fuzzy=True).year
+                    print(birth_date)
+                except:
+                    print('No birth date found')
+                    birth_date = ''
+                try:
+                    death_date = wiki.split('death_date')[1].lower()
+                    death_date = death_date.replace('df=', '')
+                    death_date = death_date.replace('mf=', '')
+                    death_date = death_date.replace('_' ,'')
+                    death_date = death_date.replace('death date and given age' ,'death date and age')
+                    death_date = death_date.split('=')[1]
+                    death_date = death_date.split('\n')[0].strip()
+                    #maybe replace the brackets
+                    death_date = death_date.replace('{{','')
+                    death_date = death_date.replace('}}','')
+                    death_date = death_date.replace('|', '-')
+                    death_date = death_date.split('aged')[0]
+                    death_date = death_date.strip('y')
+                    death_date = death_date.strip('-')
+                    death_date = death_date.strip(')')
+                    #death_date = '20 december 1855)'
+                    death_date = parse(death_date, fuzzy=True).year
+                    print(death_date)
+                    #if the text is matched do the following below:
+                except:
+                    print('No death date found')
+                    death_date = ''
+            except:
+                print('Error in Demographics data')
         except:
             print("Error in links")
     except:
         print('Error')
-#Remove list of results
+    dft = pd.DataFrame({'Title':p.title, 'Url':p.url,'Page Length':len(p.content), 'Query': i, 'pageid': p.pageid, 'Birth Year':birth_date, 'Death Year':death_date}, index = [0])
+    full_list.append(dft)
 
+#Remove list of results
 full_df = pd.concat(full_list, axis = 0)
 links_df = pd.concat(full_links, axis = 0)
 links_df.columns = ['link', 'page title']
@@ -69,6 +133,9 @@ links_people.groupby(['link']).size().reset_index().sort_values(by = 0, ascendin
 #filter the internal referals
 links_people = links_people[~(links_people['link'] == links_people['page title'])]
 
+#count the link and the page title
+links_people.groupby('link').size().reset_index().sort_values(by=0,ascending = False)
+links_people.groupby('page title').size().reset_index().sort_values(by=0,ascending = False)
 #links_people = links_people[links_people['link'] != 'International Standard Book Number']
 
 #full_df.to_csv('~/Downloads/biggest_architects.csv', sep = ';')
